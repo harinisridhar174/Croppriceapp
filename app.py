@@ -1,86 +1,47 @@
 import streamlit as st
-import joblib
+import pickle
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 
-# Set page config
-st.set_page_config(page_title="Crop Price Prediction", page_icon="🌾", layout="centered")
+# Title and Description
+st.set_page_config(page_title="Crop Price Predictor", page_icon="🌾", layout="centered")
+st.title("🌾 Crop Price Prediction App")
+st.markdown("### Helping Farmers Decide When to Sell Crops")
 
-# Custom CSS for better UI
-st.markdown("""
-    <style>
-    body {
-        background-color: #F0F8FF;
-    }
-    .title {
-        text-align: center;
-        color: #2E8B57;
-        font-size: 40px;
-        font-weight: bold;
-    }
-    .prediction {
-        color: #1E90FF;
-        font-size: 24px;
-        text-align: center;
-    }
-    .recommend {
-        color: #FF4500;
-        font-size: 20px;
-        text-align: center;
-        font-weight: bold;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Title
-st.markdown('<p class="title">🌾 Crop Price Prediction App</p>', unsafe_allow_html=True)
-
-# Sidebar
-st.sidebar.title("🔍 About")
-st.sidebar.info("""
-This app predicts future crop prices using a **trained LSTM model**.
-Enter your crop name and details to get a recommendation whether to SELL or WAIT.
-""")
-
-# Load LSTM Model
+# Load the trained LSTM model
 try:
-    model_data = joblib.load("lstm_models.joblib")
-    st.sidebar.success("✅ Model Loaded Successfully!")
-except:
-    st.sidebar.error("❌ Model file not found. Please upload lstm_models.joblib to the repo.")
+    with open("lstm_models.pkl", "rb") as f:
+        model = pickle.load(f)
+except FileNotFoundError:
+    st.error("❌ Model file not found! Please check if `lstm_models.pkl` is uploaded.")
+    st.stop()
 
-# Crop selection
-crops = list(model_data.keys()) if isinstance(model_data, dict) else ["Wheat", "Rice", "Maize"]
-selected_crop = st.selectbox("Select Crop", crops)
+# Sidebar for navigation
+st.sidebar.title("Navigation")
+st.sidebar.markdown("Use this app to predict crop prices and decide whether to **sell now or wait**.")
 
-# Farmer input section
-st.subheader("📌 Enter Details")
-recent_price = st.number_input("Enter Recent Price (₹ per quintal):", min_value=100.0, max_value=10000.0, step=10.0)
+# Inputs for the farmer
+crop_name = st.selectbox("Select Crop", ["Wheat", "Rice", "Maize", "Sugarcane", "Cotton", "Soybean"])
+state = st.text_input("Enter State")
+price_today = st.number_input("Enter Today's Price (₹ per quintal)", min_value=0.0, step=0.01)
 
+# Predict Button
 if st.button("Predict Price"):
-    if isinstance(model_data, dict) and selected_crop in model_data:
-        model = model_data[selected_crop]
-
-        # Create dummy sequence for LSTM input (example: last 30 prices, here just repeated value)
-        input_data = np.array([recent_price] * 30).reshape(1, 30, 1)
-
-        predicted_price = model.predict(input_data)[0][0]
-
-        st.markdown(f'<p class="prediction">💰 Predicted Price: ₹{predicted_price:.2f}</p>', unsafe_allow_html=True)
-
-        if predicted_price > recent_price:
-            st.markdown('<p class="recommend">📈 Recommendation: WAIT (Price may increase)</p>', unsafe_allow_html=True)
-        else:
-            st.markdown('<p class="recommend">📉 Recommendation: SELL NOW</p>', unsafe_allow_html=True)
-
-        # Optional price trend chart
-        fig, ax = plt.subplots()
-        prices = [recent_price, predicted_price]
-        ax.plot(['Current', 'Predicted'], prices, marker='o')
-        ax.set_ylabel('Price (₹)')
-        ax.set_title(f'{selected_crop} Price Trend')
-        st.pyplot(fig)
-
+    if price_today <= 0:
+        st.warning("Please enter a valid price.")
     else:
-        st.error("Model for selected crop not found!")
+        # Prepare input for the model
+        input_data = np.array([[price_today]])  # Modify based on your model input shape
+        try:
+            predicted_price = model.predict(input_data)[0]
+            st.success(f"📈 Predicted Price: ₹ {predicted_price:.2f}")
+
+            # Advice for the farmer
+            if predicted_price > price_today:
+                st.markdown("✅ **Advice:** Wait! Price is expected to go up. 🌟")
+            else:
+                st.markdown("❌ **Advice:** Sell now! Price might drop. ⚠")
+        except Exception as e:
+            st.error(f"Prediction Error: {e}")
+
+
+
