@@ -32,8 +32,14 @@ st.markdown("### Get price insights and suggestions for your crops")
 # ----------------- Load CSV -----------------
 data = pd.read_csv("multi_crop_prices_reduced_2000.csv")
 
-# Ensure lowercase column names
-data.columns = data.columns.str.lower()
+# Normalize column names
+data.columns = [c.strip().lower() for c in data.columns]
+
+# Make sure required columns exist
+required_cols = {"crop", "state", "price"}
+if not required_cols.issubset(set(data.columns)):
+    st.error(f"CSV file must contain these columns: {required_cols}")
+    st.stop()
 
 # ----------------- Farmer Input -----------------
 crop = st.selectbox("Select Crop", sorted(data['crop'].unique()))
@@ -54,6 +60,8 @@ if st.button("Get Suggestion"):
         st.warning(f"**Suggestion: {suggestion}**")
     else:
         st.error("⚠️ No data available for this crop/state combination.")
+
+
 
 
 
