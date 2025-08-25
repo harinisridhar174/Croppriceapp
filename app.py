@@ -1,88 +1,79 @@
 import streamlit as st
 import pandas as pd
-import pickle
+from sklearn.linear_model import LinearRegression
 import numpy as np
-from datetime import datetime, timedelta
-import base64
+import matplotlib.pyplot as plt
 
-# ----------------- Page Config -----------------
-st.set_page_config(page_title="Agri Crop Price Predictor", layout="wide")
+# 🎨 Background image
+page_bg = """
+<style>
+[data-testid="stAppViewContainer"] {
+    background-image: url("https://i.ibb.co/8YdBBF0/farmer-bg.jpg");
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+}
+[data-testid="stHeader"] {
+    background: rgba(0,0,0,0);
+}
+</style>
+"""
+st.markdown(page_bg, unsafe_allow_html=True)
 
-# ----------------- Background Image -----------------
-def add_bg_from_local(image_file):
-    with open(image_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/png;base64,{encoded}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-            color: #1B4332;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+# Load dataset
+data = pd.read_csv("multi_crop_reduced_2000.csv")
 
-# Call background setter (⚠️ place your image in project folder with this name)
-add_bg_from_local("plough_tool.jpg")
+st.title("🌾 Crop Price Forecast (விவசாயி விலை முன்னறிவு)")
 
-# ----------------- Load Model -----------------
-with open('crop_price_model.pkl', 'rb') as file:
-    model_data = pickle.load(file)
+# User input
+crop = st.selectbox("👉 Select Crop (பயிர்)", data["Crop"].unique())
+state = st.selectbox("👉 Select State (மாநிலம்)", data["State"].unique())
 
-model = model_data['model']
-scaler = model_data['scaler']
-crop_state_data = model_data['crop_state_data']
+if st.button("🔮 Predict Next 7 Days"):
+    subset = data[(data["Crop"] == crop) & (data["State"] == state)]
 
-# ----------------- Title -----------------
-st.markdown("<h1 style='color:#2E8B57;'>🌾 Agri Crop Price Predictor</h1>", unsafe_allow_html=True)
-st.write("Enter the details below to get the predicted price and sell recommendation:")
-
-# ----------------- Farmer Inputs -----------------
-crop_name = st.selectbox("Select Crop", crop_state_data['Crop'].unique())
-state = st.selectbox("Select State", crop_state_data['State'].unique())
-current_price = st.number_input("Enter Current Market Price", min_value=0.0, value=0.0)
-
-# ----------------- Prediction -----------------
-if st.button("Predict Price and Recommendation"):
-    input_df = crop_state_data[(crop_state_data['Crop']==crop_name) & 
-                               (crop_state_data['State']==state)].copy()
-
-    if input_df.empty:
-        st.warning("No data available for this crop & state combination.")
+    if subset.empty:
+        st.error("⚠️ No data available for this crop and state.")
     else:
-        # Example: take last available features
-        last_features = input_df.iloc[-1:].drop(['Price'], axis=1).values
-        last_scaled = scaler.transform(last_features)
+        # Historical data
+        latest_price = subset["Price"].iloc[-1]
+        avg_price = subset["Price"].tail(5).mean()
 
-        # Predict price
-        predicted_price_scaled = model.predict(last_scaled)
-        predicted_price = scaler.inverse_transform(
-            np.hstack([last_features[:, :-1], predicted_price_scaled.reshape(-1,1)])
-        )[:, -1][0]
+        # Train Linear Regression model
+        X = np.arange(len(subset)).reshape(-1, 1)
+        y = subset["Price"].values
+        model = LinearRegression().fit(X, y)
 
-        # Recommendation logic
-        if predicted_price > current_price * 1.05:
-            recommendation = "Wait to sell for higher profit"
-            best_time = datetime.now() + timedelta(days=7)
+        # Predict next 7 days
+        future_days = np.arange(len(subset)+1, len(subset)+8).reshape(-1, 1)
+        predicted_prices = model.predict(future_days)
+
+        # Suggestion logic
+        if predicted_prices.mean() >= avg_price:
+            suggestion = "✅ SELL soon! (விற்கவும்!)"
         else:
-            recommendation = "Sell now"
-            best_time = datetime.now()
+            suggestion = "⏳ WAIT for better price. (மேலும் நல்ல விலை காத்திருக்கவும்.)"
 
-        # 🔹 Trend Indicator
-        if predicted_price > current_price:
-            trend = "📈 Rising"
-        elif predicted_price < current_price:
-            trend = "📉 Falling"
-        else:
-            trend = "➖ Stable"
+        # Show results
+        st.success(f"🌱 Crop: {crop} | 📍 State: {state}")
+        st.write(f"💰 Latest Price: **{latest_price:.2f}**")
+        st.write(f"📉 Recent Avg Price: **{avg_price:.2f}**")
+        st.write("🔮 **Predicted Prices for Next 7 Days:**")
+        forecast_df = pd.DataFrame({
+            "Day": [f"Day {i+1}" for i in range(7)],
+            "Predicted Price": predicted_prices.round(2)
+        })
+        st.table(forecast_df)
+        st.subheader(suggestion)
 
-        # ----------------- Display Results -----------------
-        st.success(f"Predicted Price: ₹{predicted_price:.2f}")
-        st.info(f"Recommendation: {recommendation}")
-        st.info(f"Suggested Best Time to Sell: {best_time.strftime('%Y-%m-%d')}")
-        st.warning(f"Trend: {trend}")
+        # 📈 Chart with colors
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(range(len(y)), y, label="Historical", color="green", marker="o")
+        ax.plot(range(len(y), len(y)+7), predicted_prices, label="Predicted", color="orange", marker="o")
+        ax.set_title(f"Price Trend for {crop} in {state}")
+        ax.set_xlabel("Time")
+        ax.set_ylabel("Price")
+        ax.legend()
+        st.pyplot(fig)
+
+
