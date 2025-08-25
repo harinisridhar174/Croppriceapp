@@ -1,73 +1,61 @@
+# app.py
 import streamlit as st
 import pandas as pd
 
 # ----------------- Page Config -----------------
 st.set_page_config(page_title="🌾 Crop Price Predictor", layout="wide")
 
-# ----------------- Custom CSS with Farmer Background -----------------
-page_bg_img = f"""
+# Background image (farmer field)
+page_bg_img = """
 <style>
-[data-testid="stAppViewContainer"] {{
-    background-image: url("https://upload.wikimedia.org/wikipedia/commons/1/15/Indian_farmer_in_field.jpg");  
+[data-testid="stAppViewContainer"] {
+    background-image: url("https://upload.wikimedia.org/wikipedia/commons/6/65/Rice_fields_in_Tamil_Nadu_01.jpg");
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-}}
-[data-testid="stHeader"] {{
+}
+[data-testid="stHeader"] {
     background: rgba(0,0,0,0);
-}}
-.css-1d391kg, .css-hxt7ib {{
-    background-color: rgba(255, 255, 255, 0.85) !important;
+}
+.block-container {
+    background-color: rgba(255,255,255,0.85);
+    padding: 2rem;
     border-radius: 15px;
-    padding: 15px;
-}}
-h1, h2, h3, h4, h5, h6, p, span, label {{
-    color: #1a1a1a !important;
-    font-weight: 600;
-}}
+}
 </style>
 """
 st.markdown(page_bg_img, unsafe_allow_html=True)
 
-# ----------------- Title -----------------
-st.title("🚜🌾 Crop Price Predictor")
-st.markdown("### Empowering Farmers with Data-Driven Price Insights 💰")
+st.title("🌾 Crop Price Predictor")
+st.markdown("### Get price insights and suggestions for your crops")
 
-# ----------------- Load Data -----------------
-@st.cache_data
-def load_data():
-    return pd.read_csv("multi_crop_prices_reduced_2000.csv")
+# ----------------- Load CSV -----------------
+data = pd.read_csv("multi_crop_prices_reduced_2000.csv")
 
-data = load_data()
-
-# Ensure required columns exist
-if not {"Crop", "State", "Price"}.issubset(data.columns):
-    st.error("❌ CSV file must have columns: Crop, State, Price")
-    st.stop()
+# Ensure lowercase column names
+data.columns = data.columns.str.lower()
 
 # ----------------- Farmer Input -----------------
-col1, col2 = st.columns(2)
-
-with col1:
-    crop = st.selectbox("🌱 Select Crop", sorted(data["Crop"].unique()))
-
-with col2:
-    state = st.selectbox("📍 Select State", sorted(data["State"].unique()))
+crop = st.selectbox("Select Crop", sorted(data['crop'].unique()))
+state = st.selectbox("Select State", sorted(data['state'].unique()))
 
 # ----------------- Predict Price & Suggestion -----------------
-if st.button("🔍 Get Suggestion"):
-    df = data[(data["Crop"] == crop) & (data["State"] == state)]
+if st.button("Get Suggestion"):
+    df = data[(data['crop'] == crop) & (data['state'] == state)]
 
     if not df.empty:
-        predicted_price = df["Price"].iloc[-1]  # last available price
-        avg_price = data[data["Crop"] == crop]["Price"].tail(5).mean()  # last 5 entries avg
-        suggestion = "✅ Sell Now!" if predicted_price >= avg_price else "⏳ Better to Wait."
+        latest_price = df['price'].iloc[-1]  # most recent price
+        avg_price = data[data['crop'] == crop]['price'].mean()
 
-        st.success(f"💰 **Predicted Price:** ₹{predicted_price}")
-        st.info(f"📊 **Recent Avg Price:** ₹{avg_price:.2f}")
-        st.warning(f"👉 Suggestion: {suggestion}")
+        suggestion = "✅ Sell" if latest_price >= avg_price else "⏳ Wait"
+
+        st.success(f"**Predicted Price (Latest): ₹{latest_price:.2f}**")
+        st.info(f"**Average Price (All States): ₹{avg_price:.2f}**")
+        st.warning(f"**Suggestion: {suggestion}**")
     else:
         st.error("⚠️ No data available for this crop/state combination.")
+
+
 
 
 
