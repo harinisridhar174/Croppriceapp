@@ -1,43 +1,37 @@
+# app_basic_crop.py
 import streamlit as st
 import pandas as pd
-from sklearn.linear_model import LinearRegression
-import numpy as np
 
-# Load dataset
-data = pd.read_csv("multi_crop_reduced_2000.csv")
+st.set_page_config(page_title="Crop Price Predictor", layout="centered")
+st.title("🌾 Crop Price Predictor (Basic Version)")
 
-st.title("🌾 Simple Crop Price Predictor")
+# ----------------- Sample Data -----------------
+# You can replace this with your actual CSV later
+data = pd.DataFrame({
+    'Crop': ['Wheat', 'Rice', 'Maize', 'Sugarcane'],
+    'State': ['State1', 'State2', 'State1', 'State2'],
+    'Price': [2000, 1500, 1800, 2200]
+})
 
-# User input
-crop = st.selectbox("Select Crop", data["Crop"].unique())
-state = st.selectbox("Select State", data["State"].unique())
+# ----------------- Farmer Input -----------------
+crop = st.selectbox("Select Crop", data['Crop'].unique())
+state = st.selectbox("Select State", data['State'].unique())
 
-if st.button("Predict Price"):
-    subset = data[(data["Crop"] == crop) & (data["State"] == state)]
-
-    if subset.empty:
-        st.error("No data available for this crop and state.")
+# ----------------- Predict Price & Suggestion -----------------
+if st.button("Get Suggestion"):
+    # Filter data for selected crop and state
+    df = data[(data['Crop']==crop) & (data['State']==state)]
+    
+    if not df.empty:
+        predicted_price = df['Price'].values[0]
+        avg_price = data[data['Crop']==crop]['Price'].mean()
+        suggestion = "Sell" if predicted_price >= avg_price else "Wait"
+        
+        st.success(f"Predicted Price: ₹{predicted_price}")
+        st.info(f"Suggestion: {suggestion}")
     else:
-        # Historical prices
-        y = subset["Price"].values
-        X = np.arange(len(y)).reshape(-1, 1)
+        st.warning("No data available for this crop/state combination.")
 
-        # Train a simple regression model
-        model = LinearRegression().fit(X, y)
-
-        # Predict next day price
-        predicted_price = model.predict([[len(y)+1]])[0]
-
-        # Recent average
-        avg_price = subset["Price"].tail(5).mean()
-
-        # Suggestion
-        suggestion = "SELL now ✅" if predicted_price > avg_price else "WAIT ⏳"
-
-        # Show results
-        st.write(f"Predicted Price: {predicted_price:.2f}")
-        st.write(f"Recent Avg Price: {avg_price:.2f}")
-        st.write(f"Suggestion: {suggestion}")
 
 
 
