@@ -1,94 +1,58 @@
+# app.py
 import streamlit as st
 import pandas as pd
-import pickle
 import numpy as np
-from datetime import datetime, timedelta
-import base64
+import pickle
+import tensorflow as tf
+from sklearn.preprocessing import MinMaxScaler
 
-# ----------------- Page Config -----------------
-st.set_page_config(page_title="Agri Crop Price Predictor", layout="wide")
+# ------------------- Page Config -------------------
+st.set_page_config(page_title="🌾 Crop Price Predictor", layout="centered")
+st.title("🌾 Crop Price Prediction with LSTM")
 
-# ----------------- Background Image -----------------
-def add_bg_from_local(image_file):
-    with open(image_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/png;base64,{encoded}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-            color: #1B4332;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+# ------------------- Load Data -------------------
+@st.cache_data
+def load_data():
+    return pd.read_csv("multi_crop_prices_reduced_2000.csv")
 
-# ✅ Use Wikipedia plough image (download it as plough_tool.jpg and keep in project folder)
-try:
-    add_bg_from_local("plough_tool.jpg")
-except FileNotFoundError:
-    st.warning("Background image not found. Proceeding without background.")
+data = load_data()
 
-# ----------------- Load Model -----------------
-with open('crop_price_model.pkl', 'rb') as file:
-    model_data = pickle.load(file)
+# ------------------- Load Model -------------------
+@st.cache_resource
+def load_model():
+    with open("lstm_models.pkl", "rb") as f:
+        return pickle.load(f)
 
-model = model_data['model']
-scaler = model_data['scaler']
-crop_state_data = model_data['crop_state_data']
+model = load_model()
 
-# ----------------- Title -----------------
-st.markdown("<h1 style='color:#2E8B57;'>🌾 Agri Crop Price Predictor</h1>", unsafe_allow_html=True)
-st.write("Enter the details below to get the predicted price and sell recommendation:")
+# ------------------- Farmer Input -------------------
+crop = st.selectbox("👉 Select Crop", data["Crop"].unique())
+state = st.selectbox("👉 Select State", data["State"].unique())
 
-# ----------------- Farmer Inputs -----------------
-crop_name = st.selectbox("Select Crop", crop_state_data['Crop'].unique())
-state = st.selectbox("Select State", crop_state_data['State'].unique())
-current_price = st.number_input("Enter Current Market Price", min_value=0.0, value=0.0)
+# ------------------- Predict -------------------
+if st.button("🔮 Predict Future Price"):
+    subset = data[(data["Crop"] == crop) & (data["State"] == state)]
 
-# ----------------- Prediction -----------------
-if st.button("Predict Price and Recommendation"):
-    input_df = crop_state_data[(crop_state_data['Crop']==crop_name) & 
-                               (crop_state_data['State']==state)].copy()
-
-    if input_df.empty:
-        st.warning("No data available for this crop & state combination.")
+    if subset.empty:
+        st.error("⚠️ No data available for this crop/state.")
     else:
-        # Take last available features
-        last_features = input_df.iloc[-1:].drop(['Price'], axis=1).values
-        last_scaled = scaler.transform(last_features)
+        # Use last 30 prices for prediction (adjust window if trained differently)
+        prices = subset["Price"].values.reshape(-1, 1)
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaled_prices = scaler.fit_transform(prices)
 
-        # Predict price
-        predicted_price_scaled = model.predict(last_scaled)
-        predicted_price = scaler.inverse_transform(
-            np.hstack([last_features[:, :-1], predicted_price_scaled.reshape(-1,1)])
-        )[:, -1][0]
+        last_seq = scaled_prices[-30:].reshape(1, 30, 1)  # shape for LSTM
+        predicted_scaled = model.predict(last_seq)
+        predicted_price = scaler.inverse_transform(predicted_scaled)[0][0]
 
-        # Recommendation logic (enhanced)
-        if predicted_price > current_price * 1.10:
-            recommendation = "🚜 Strongly wait – price likely to increase further"
-            best_time = datetime.now() + timedelta(days=10)
-        elif predicted_price > current_price * 1.05:
-            recommendation = "🌱 Wait to sell for higher profit"
-            best_time = datetime.now() + timedelta(days=7)
-        else:
-            recommendation = "💰 Sell now"
-            best_time = datetime.now()
+        # Suggestion
+        avg_recent = subset["Price"].tail(5).mean()
+        suggestion = "✅ Sell now!" if predicted_price >= avg_recent else "⏳ Better to Wait."
 
-        # 🔹 Trend Indicator
-        if predicted_price > current_price:
-            trend = "📈 Rising"
-        elif predicted_price < current_price:
-            trend = "📉 Falling"
-        else:
-            trend = "➖ Stable"
+        # Show results
+        st.success(f"🌱 Crop: {crop} | 📍 State: {state}")
+        st.write(f"💰 Predicted Future Price: **₹{predicted_price:.2f}**")
+        st.write(f"📉 Recent Average Price: **₹{avg_recent:.2f}**")
+        st.subheader(suggestion)
 
-        # ----------------- Display Results -----------------
-        st.success(f"Predicted Price: ₹{predicted_price:.2f}")
-        st.info(f"Recommendation: {recommendation}")
-        st.info(f"Suggested Best Time to Sell: {best_time.strftime('%Y-%m-%d')}")
-        st.warning(f"Trend: {trend}")
+
