@@ -1,7 +1,10 @@
 streamlit
-pandas
 numpy
+pandas
 scikit-learn
+tensorflow
+
+
 
 
 
