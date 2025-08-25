@@ -1,12 +1,12 @@
-# app_farmers_pro.py
+# app_farmers_pro_api.py
 import streamlit as st
 import pandas as pd
 import pickle
 import requests
 from PIL import Image
 from io import BytesIO
-import wikipedia
 from gtts import gTTS
+import wikipediaapi
 
 # ----------------- Load Model & Data -----------------
 with open('lstm_models.pkl', 'rb') as f:
@@ -60,10 +60,10 @@ crop_selection = None
 # Optional small icons for each crop
 crop_icons = {crop: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Wheat_close-up.JPG/50px-Wheat_close-up.JPG" for crop in crop_list}
 
-for i, crop in enumerate(crop_list):
+for i, crop_name in enumerate(crop_list):
     col = cols[i % 4]
-    if col.button(crop):
-        crop_selection = crop
+    if col.button(crop_name):
+        crop_selection = crop_name
 
 if crop_selection:
     crop = crop_selection
@@ -89,16 +89,22 @@ if st.button(t("Predict Price")):
     col2.markdown(f"<h2 style='background-color:{color};padding:10px;border-radius:10px;text-align:center;color:white'>{t('Suggestion')}: {suggestion}</h2>", unsafe_allow_html=True)
     
     # ----------------- Wikipedia Info -----------------
+    wiki_wiki = wikipediaapi.Wikipedia('en')
+    page = wiki_wiki.page(crop)
+    if page.exists():
+        st.markdown(f"**{t('Wikipedia Summary')}:** {page.summary[0:500]}")
+    else:
+        st.warning("Crop info not found on Wikipedia.")
+    
+    # ----------------- Crop Image -----------------
     try:
-        wiki_page = wikipedia.page(crop)
-        img_url = wiki_page.images[0]
+        # You can fetch first image from Wikipedia or use placeholder
+        img_url = f"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Wheat_close-up.JPG/400px-Wheat_close-up.JPG"
         response = requests.get(img_url)
         img = Image.open(BytesIO(response.content))
         st.image(img, caption=crop, use_column_width=True)
-        summary = wikipedia.summary(crop, sentences=3)
-        st.markdown(f"**{t('Wikipedia Summary')}:** {summary}")
     except:
-        st.warning("Crop info not found on Wikipedia.")
+        st.warning("Crop image not available.")
     
     # ----------------- Audio -----------------
     text_to_speak = f"{t('Predicted Price')}: {predicted_price:.2f}. {t('Suggestion')}: {suggestion}."
@@ -108,6 +114,7 @@ if st.button(t("Predict Price")):
     audio_file = open("prediction.mp3", "rb")
     audio_bytes = audio_file.read()
     st.audio(audio_bytes, format="audio/mp3", start_time=0)
+
 
 
 
