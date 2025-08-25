@@ -2,7 +2,12 @@ streamlit
 numpy
 pandas
 scikit-learn
-tensorflow
+joblib
+tensorflow==2.13.0
 gTTS
+Pillow
+requests
+
+
 
 
