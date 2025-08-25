@@ -1,89 +1,87 @@
 import streamlit as st
-import numpy as np
-import pickle
-from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
-import plotly.graph_objs as go
+import pickle
+import numpy as np
+from datetime import datetime, timedelta
+import base64
 
-st.title("🌾 Crop Price Prediction & Suggestion")
+# ----------------- Page Config -----------------
+st.set_page_config(page_title="Agri Crop Price Predictor", layout="wide")
 
-# ----------------- Embedded Data -----------------
-data = pd.DataFrame({
-    'Crop': ['Wheat', 'Rice', 'Maize', 'Sugarcane'],
-    'State': ['State1', 'State1', 'State2', 'State2'],
-    'Price': [2000, 1500, 1800, 2200],
-    'Date': pd.date_range(start='2025-01-01', periods=4)
-})
-
-# ----------------- Load LSTM model -----------------
-with open('lstm_models.pkl', 'rb') as f:
-    model = pickle.load(f)
-
-# ----------------- User Inputs -----------------
-crop = st.selectbox("Select Crop", data['Crop'].unique())
-state = st.selectbox("Select State", data['State'].unique())
-
-# ----------------- Prepare Input -----------------
-def prepare_input(crop, state):
-    df = data[(data['Crop']==crop) & (data['State']==state)]
-    df = df.sort_values('Date')
-    recent_prices = df['Price'].values
-    if len(recent_prices) < 30:
-        recent_prices = np.pad(recent_prices, (30-len(recent_prices), 0),
-                               'constant', constant_values=df['Price'].mean())
-    scaler = MinMaxScaler()
-    recent_prices_scaled = scaler.fit_transform(recent_prices.reshape(-1,1))
-    return recent_prices_scaled.reshape(1,30,1), scaler, df
-
-# ----------------- Prediction -----------------
-if st.button("Get Suggestion"):
-    X_input, scaler, df = prepare_input(crop, state)
-    predicted_scaled = model.predict(X_input)
-    predicted_price = scaler.inverse_transform(predicted_scaled)[0][0]
-
-    # Suggestion logic
-    avg_price = data[data['Crop']==crop]['Price'].mean()
-    suggestion = "Sell ✅" if predicted_price >= avg_price else "Wait ⏳"
-
-    # Trend indicator
-    last_price = df['Price'].iloc[-1]
-    if predicted_price > last_price:
-        trend = "📈 Rising"
-    elif predicted_price < last_price:
-        trend = "📉 Falling"
-    else:
-        trend = "➖ Stable"
-
-    # ----------------- Display Results -----------------
-    st.success(f"Predicted Price: ₹{predicted_price:.2f}")
-    st.info(f"Suggestion: {suggestion}")
-    st.warning(f"Trend: {trend}")
-
-    # ----------------- Interactive Chart -----------------
-    future_date = df['Date'].iloc[-1] + pd.Timedelta(days=1)
-    df_future = pd.DataFrame({'Date': [future_date], 'Price': [predicted_price]})
-
-    fig = go.Figure()
-
-    # Past prices
-    fig.add_trace(go.Scatter(
-        x=df['Date'], y=df['Price'],
-        mode='lines+markers', name="Past Prices"
-    ))
-
-    # Predicted price
-    fig.add_trace(go.Scatter(
-        x=df_future['Date'], y=df_future['Price'],
-        mode='markers+text', name="Predicted Price",
-        text=["Predicted"], textposition="top center",
-        marker=dict(color="red", size=10)
-    ))
-
-    fig.update_layout(
-        title=f"Price Trend for {crop} in {state}",
-        xaxis_title="Date",
-        yaxis_title="Price (₹)",
-        template="plotly_white"
+# ----------------- Background Image Function -----------------
+def add_bg_from_local(image_file):
+    with open(image_file, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode()
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            background-image: url("data:image/png;base64,{encoded}");
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+# Call background setter (replace with your image filename)
+add_bg_from_local("plough_tool.jpg")  # <-- Put your ancient ploughing tool image in project folder
+
+# ----------------- Load Model -----------------
+with open('crop_price_model.pkl', 'rb') as file:
+    model_data = pickle.load(file)
+
+model = model_data['model']
+scaler = model_data['scaler']
+crop_state_data = model_data['crop_state_data']
+
+# ----------------- Title -----------------
+st.markdown("<h1 style='color:#2E8B57;'>🌾 Agri Crop Price Predictor</h1>", unsafe_allow_html=True)
+st.write("Enter the details below to get the predicted price and sell recommendation:")
+
+# ----------------- Farmer Inputs -----------------
+crop_name = st.selectbox("Select Crop", crop_state_data['Crop'].unique())
+state = st.selectbox("Select State", crop_state_data['State'].unique())
+current_price = st.number_input("Enter Current Market Price", min_value=0.0, value=0.0)
+
+# ----------------- Prediction -----------------
+if st.button("Predict Price and Recommendation"):
+
+    input_df = crop_state_data[(crop_state_data['Crop'] == crop_name) &
+                               (crop_state_data['State'] == state)].copy()
+
+    if input_df.empty:
+        st.warning("No data available for this crop & state combination.")
+    else:
+        last_features = input_df.iloc[-1:].drop(['Price'], axis=1).values
+        last_scaled = scaler.transform(last_features)
+
+        # Predict price
+        predicted_price_scaled = model.predict(last_scaled)
+        predicted_price = scaler.inverse_transform(
+            np.hstack([last_features[:, :-1], predicted_price_scaled.reshape(-1, 1)])
+        )[:, -1][0]
+
+        # Recommendation logic
+        if predicted_price > current_price * 1.05:
+            recommendation = "Wait to sell for higher profit"
+            best_time = datetime.now() + timedelta(days=7)
+        else:
+            recommendation = "Sell now"
+            best_time = datetime.now()
+
+        # Trend Indicator
+        if predicted_price > current_price:
+            trend = "📈 Rising"
+        elif predicted_price < current_price:
+            trend = "📉 Falling"
+        else:
+            trend = "➖ Stable"
+
+        # ----------------- Display Results -----------------
+        st.success(f"Predicted Price: ₹{predicted_price:.2f}")
+        st.info(f"Recommendation: {recommendation}")
+        st.info(f"Suggested Best Time to Sell: {best_time.strftime('%Y-%m-%d')}")
+        st.warning(f"Trend: {trend}")
