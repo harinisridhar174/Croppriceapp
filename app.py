@@ -1,36 +1,57 @@
-# app_basic_crop.py
 import streamlit as st
 import pandas as pd
+import numpy as np
+import pickle
+from sklearn.preprocessing import MinMaxScaler
 
-st.set_page_config(page_title="Crop Price Predictor", layout="centered")
-st.title("🌾 Crop Price Predictor (Basic Version)")
+# Title
+st.title("🌾 Crop Price Prediction & Suggestion")
 
-# ----------------- Sample Data -----------------
-# You can replace this with your actual CSV later
-data = pd.DataFrame({
-    'Crop': ['Wheat', 'Rice', 'Maize', 'Sugarcane'],
-    'State': ['State1', 'State2', 'State1', 'State2'],
-    'Price': [2000, 1500, 1800, 2200]
-})
+# Load dataset
+@st.cache_data
+def load_data():
+    return pd.read_csv('multi_crop_prices_extended_cleaned.csv')
 
-# ----------------- Farmer Input -----------------
-crop = st.selectbox("Select Crop", data['Crop'].unique())
-state = st.selectbox("Select State", data['State'].unique())
+data = load_data()
 
-# ----------------- Predict Price & Suggestion -----------------
+# Load trained LSTM model
+with open('lstm_models.pkl', 'rb') as f:
+    model = pickle.load(f)
+
+# Dropdowns for crop and state
+crops = data['Crop'].unique()
+states = data['State'].unique()
+
+crop = st.selectbox("Select Crop", crops)
+state = st.selectbox("Select State", states)
+
+# Function to prepare input for LSTM
+def prepare_input(crop, state):
+    df = data[(data['Crop'] == crop) & (data['State'] == state)]
+    df = df.sort_values('Date')  # Ensure chronological order
+    recent_prices = df['Price'].values[-30:]  # Last 30 days
+    if len(recent_prices) < 30:
+        recent_prices = np.pad(recent_prices, (30 - len(recent_prices), 0), 'constant', constant_values=df['Price'].mean())
+    scaler = MinMaxScaler()
+    recent_prices_scaled = scaler.fit_transform(recent_prices.reshape(-1, 1))
+    return recent_prices_scaled.reshape(1, 30, 1), scaler
+
+# Prediction
 if st.button("Get Suggestion"):
-    # Filter data for selected crop and state
-    df = data[(data['Crop']==crop) & (data['State']==state)]
-    
-    if not df.empty:
-        predicted_price = df['Price'].values[0]
-        avg_price = data[data['Crop']==crop]['Price'].mean()
-        suggestion = "Sell" if predicted_price >= avg_price else "Wait"
-        
-        st.success(f"Predicted Price: ₹{predicted_price}")
+    try:
+        X_input, scaler = prepare_input(crop, state)
+        predicted_scaled = model.predict(X_input)
+        predicted_price = scaler.inverse_transform(predicted_scaled)[0][0]
+
+        avg_price = data[data['Crop'] == crop]['Price'].mean()
+        suggestion = "Sell ✅" if predicted_price >= avg_price else "Wait ⏳"
+
+        st.success(f"Predicted Price: ₹{predicted_price:.2f}")
         st.info(f"Suggestion: {suggestion}")
-    else:
-        st.warning("No data available for this crop/state combination.")
+    except Exception as e:
+        st.error(f"Error: {e}")
+
+
 
 
 
