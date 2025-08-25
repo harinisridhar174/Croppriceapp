@@ -1,4 +1,4 @@
-# app_farmers_pro_api.py
+# app_farmers_final.py
 import streamlit as st
 import pandas as pd
 import pickle
@@ -7,6 +7,7 @@ from PIL import Image
 from io import BytesIO
 from gtts import gTTS
 import wikipediaapi
+import tempfile
 
 # ----------------- Load Model & Data -----------------
 with open('lstm_models.pkl', 'rb') as f:
@@ -51,14 +52,11 @@ def t(text):
         return translations.get(text, text)
     return text
 
-# ----------------- Crop Selection with Icons -----------------
+# ----------------- Crop Selection -----------------
 st.markdown("#### " + t("Enter Crop"))
 cols = st.columns(4)
 crop_list = data['Crop'].unique().tolist()
 crop_selection = None
-
-# Optional small icons for each crop
-crop_icons = {crop: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Wheat_close-up.JPG/50px-Wheat_close-up.JPG" for crop in crop_list}
 
 for i, crop_name in enumerate(crop_list):
     col = cols[i % 4]
@@ -71,6 +69,15 @@ else:
     crop = st.selectbox(t("Enter Crop"), crop_list)
 
 state = st.selectbox(t("Select State"), data['State'].unique())
+
+# ----------------- Caching Wikipedia Summary -----------------
+@st.cache_data
+def get_wiki_summary(crop_name):
+    wiki_wiki = wikipediaapi.Wikipedia('en')
+    page = wiki_wiki.page(crop_name)
+    if page.exists():
+        return page.summary[0:500]
+    return None
 
 # ----------------- Prediction -----------------
 if st.button(t("Predict Price")):
@@ -88,17 +95,15 @@ if st.button(t("Predict Price")):
     color = "green" if suggestion==t("Sell") else "orange"
     col2.markdown(f"<h2 style='background-color:{color};padding:10px;border-radius:10px;text-align:center;color:white'>{t('Suggestion')}: {suggestion}</h2>", unsafe_allow_html=True)
     
-    # ----------------- Wikipedia Info -----------------
-    wiki_wiki = wikipediaapi.Wikipedia('en')
-    page = wiki_wiki.page(crop)
-    if page.exists():
-        st.markdown(f"**{t('Wikipedia Summary')}:** {page.summary[0:500]}")
+    # ----------------- Wikipedia Summary -----------------
+    summary = get_wiki_summary(crop)
+    if summary:
+        st.markdown(f"**{t('Wikipedia Summary')}:** {summary}")
     else:
         st.warning("Crop info not found on Wikipedia.")
     
     # ----------------- Crop Image -----------------
     try:
-        # You can fetch first image from Wikipedia or use placeholder
         img_url = f"https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Wheat_close-up.JPG/400px-Wheat_close-up.JPG"
         response = requests.get(img_url)
         img = Image.open(BytesIO(response.content))
@@ -108,12 +113,16 @@ if st.button(t("Predict Price")):
     
     # ----------------- Audio -----------------
     text_to_speak = f"{t('Predicted Price')}: {predicted_price:.2f}. {t('Suggestion')}: {suggestion}."
-    tts = gTTS(text=text_to_speak, lang='ta' if language=="தமிழ்" else 'en')
-    tts.save("prediction.mp3")
     
-    audio_file = open("prediction.mp3", "rb")
-    audio_bytes = audio_file.read()
-    st.audio(audio_bytes, format="audio/mp3", start_time=0)
+    # Use temporary file for multi-user safety
+    with tempfile.NamedTemporaryFile(delete=True, suffix=".mp3") as tmp_file:
+        tts = gTTS(text=text_to_speak, lang='ta' if language=="தமிழ்" else 'en')
+        tts.save(tmp_file.name)
+        audio_file = open(tmp_file.name, "rb")
+        audio_bytes = audio_file.read()
+        st.audio(audio_bytes, format="audio/mp3", start_time=0)
+
+
 
 
 
