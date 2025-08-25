@@ -1,58 +1,59 @@
-# app.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import pickle
 import tensorflow as tf
+from tensorflow.keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
 
 # ------------------- Page Config -------------------
 st.set_page_config(page_title="🌾 Crop Price Predictor", layout="centered")
 st.title("🌾 Crop Price Prediction with LSTM")
 
-# ------------------- Load Data -------------------
-@st.cache_data
-def load_data():
-    return pd.read_csv("multi_crop_prices_reduced_2000.csv")
-
-data = load_data()
-
 # ------------------- Load Model -------------------
 @st.cache_resource
-def load_model():
-    with open("lstm_models.pkl", "rb") as f:
-        return pickle.load(f)
+def load_lstm_model():
+    return load_model("lstm_models.h5")
 
-model = load_model()
+try:
+    model = load_lstm_model()
+    st.success("✅ LSTM model loaded successfully!")
+except Exception as e:
+    st.error(f"❌ Failed to load model: {e}")
+    st.stop()
 
-# ------------------- Farmer Input -------------------
-crop = st.selectbox("👉 Select Crop", data["Crop"].unique())
-state = st.selectbox("👉 Select State", data["State"].unique())
+# ------------------- File Upload -------------------
+uploaded_file = st.file_uploader("📂 Upload crop price CSV", type=["csv"])
 
-# ------------------- Predict -------------------
-if st.button("🔮 Predict Future Price"):
-    subset = data[(data["Crop"] == crop) & (data["State"] == state)]
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.write("📊 Uploaded Data Preview:", df.head())
 
-    if subset.empty:
-        st.error("⚠️ No data available for this crop/state.")
+    # Ask user to pick column if multiple
+    price_column = st.selectbox("👉 Select the Price Column", df.columns)
+
+    # Extract prices
+    prices = df[price_column].dropna().values.reshape(-1, 1)
+
+    # Scale data
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_prices = scaler.fit_transform(prices)
+
+    # Ensure enough data
+    if len(scaled_prices) < 60:
+        st.error("⚠️ Not enough data! Please upload at least 60 rows of prices.")
     else:
-        # Use last 30 prices for prediction (adjust window if trained differently)
-        prices = subset["Price"].values.reshape(-1, 1)
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        scaled_prices = scaler.fit_transform(prices)
+        # Prepare last 60 steps
+        X_test = []
+        X_test.append(scaled_prices[-60:])
+        X_test = np.array(X_test)
 
-        last_seq = scaled_prices[-30:].reshape(1, 30, 1)  # shape for LSTM
-        predicted_scaled = model.predict(last_seq)
-        predicted_price = scaler.inverse_transform(predicted_scaled)[0][0]
+        # Predict
+        prediction = model.predict(X_test)
+        predicted_price = scaler.inverse_transform(prediction)
 
-        # Suggestion
-        avg_recent = subset["Price"].tail(5).mean()
-        suggestion = "✅ Sell now!" if predicted_price >= avg_recent else "⏳ Better to Wait."
+        # Show result
+        st.subheader("📈 Predicted Next Price:")
+        st.success(f"💰 {predicted_price[0][0]:.2f}")
 
-        # Show results
-        st.success(f"🌱 Crop: {crop} | 📍 State: {state}")
-        st.write(f"💰 Predicted Future Price: **₹{predicted_price:.2f}**")
-        st.write(f"📉 Recent Average Price: **₹{avg_recent:.2f}**")
-        st.subheader(suggestion)
 
 
