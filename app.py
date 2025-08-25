@@ -7,7 +7,7 @@ with open("lstm_models.pkl", "rb") as f:
     model = pickle.load(f)
 
 # Load dataset
-data = pd.read_csv("crops_prices.csv")  # make sure file is in the same folder
+data = pd.read_csv("multi_crop_reduced_2000.csv")  # updated CSV filename
 
 st.title("🌾 Crop Price Prediction & Selling Suggestion")
 
@@ -22,7 +22,7 @@ if st.button("Predict Price"):
     if subset.empty:
         st.error("❌ No data available for this crop and state.")
     else:
-        # Prepare features (adjust if model training was different)
+        # Prepare features (adjust if your model training used different features)
         X = subset.drop(columns=["Price"])  # assuming "Price" is target
         y = subset["Price"]
 
@@ -57,5 +57,7 @@ if st.button("Predict Price"):
         chart_data = pd.concat([chart_data, future_point], ignore_index=True)
 
         st.line_chart(chart_data, y="Price", x=None, color="Type")
+
+
 
 
