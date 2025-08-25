@@ -1,88 +1,116 @@
+# app_farmers_pro.py
 import streamlit as st
-import numpy as np
-from tensorflow.keras.models import load_model
-from sklearn.preprocessing import MinMaxScaler
-import os
-from gtts import gTTS
-from io import BytesIO
-from PIL import Image
+import pandas as pd
+import pickle
 import requests
+from PIL import Image
+from io import BytesIO
+import wikipedia
+from gtts import gTTS
 
-# Page Config
-st.set_page_config(page_title="Crop Price Predictor", page_icon="🌾", layout="wide")
-st.title("🌾 Crop Price Prediction for Farmers")
+# ----------------- Load Model & Data -----------------
+with open('lstm_models.pkl', 'rb') as f:
+    model = pickle.load(f)
 
-# Language switcher
-language = st.radio("Select Language", ["English", "தமிழ்"])
+data = pd.read_csv('multi_crop_prices_extended_cleaned.csv')
 
-# Crop images dictionary (Wikipedia links)
-crop_images = {
-    "rice": "https://upload.wikimedia.org/wikipedia/commons/6/6f/Rice_Plant.jpg",
-    "wheat": "https://upload.wikimedia.org/wikipedia/commons/1/15/Wheat_close-up.JPG",
-    "sugarcane": "https://upload.wikimedia.org/wikipedia/commons/3/34/Sugarcane_in_field.jpg",
+# ----------------- Streamlit UI -----------------
+st.set_page_config(page_title="🌾 Crop Price Predictor", layout="wide", page_icon="🌱")
+
+# Add background image via HTML/CSS
+page_bg_img = '''
+<style>
+.stApp {
+background-image: url("https://images.unsplash.com/photo-1506806732259-39c2d0268443?auto=format&fit=crop&w=1350&q=80");
+background-size: cover;
 }
+</style>
+'''
+st.markdown(page_bg_img, unsafe_allow_html=True)
 
-# Input fields
-crop = st.selectbox("Select Crop", ["rice", "wheat", "sugarcane"])
-state = st.text_input("Enter State (e.g., Tamil Nadu)")
-recent_price = st.number_input("Enter Recent Price (₹ per quintal)", min_value=0.0, step=0.1)
+st.title("🌾 Crop Price Predictor")
+st.markdown("Helping farmers decide the best time to sell crops!")
 
-# Display crop image
-if crop in crop_images:
-    img_url = crop_images[crop]
-    img = Image.open(requests.get(img_url, stream=True).raw)
-    st.image(img, caption=crop.capitalize(), use_column_width=True)
+# Language selection
+language = st.radio("Select Language / மொழியை தேர்ந்தெடுக்கவும்", ["English", "தமிழ்"])
 
-# Prediction button
-if st.button("Predict Price"):
-    model_path = f"models/{crop}_{state.lower()}.h5"
+def t(text):
+    translations = {
+        "Enter Crop": "பண்ணை வகையை உள்ளிடவும்",
+        "Select State": "மாநிலத்தை தேர்ந்தெடுக்கவும்",
+        "Predict Price": "முன்னறிவிப்பு விலை",
+        "Predicted Price": "முன்னறிவிக்கப்பட்ட விலை",
+        "Suggestion": "சூழல் ஆலோசனை",
+        "Sell": "விற்கவும்",
+        "Wait": "காத்திருங்கள்",
+        "Crop Info": "பண்ணை தகவல்",
+        "Wikipedia Summary": "விக்கிப்பீடியா சுருக்கம்",
+        "Play Audio": "ஒலி கேளுங்கள்"
+    }
+    if language=="தமிழ்":
+        return translations.get(text, text)
+    return text
+
+# ----------------- Crop Selection with Icons -----------------
+st.markdown("#### " + t("Enter Crop"))
+cols = st.columns(4)
+crop_list = data['Crop'].unique().tolist()
+crop_selection = None
+
+# Optional small icons for each crop
+crop_icons = {crop: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Wheat_close-up.JPG/50px-Wheat_close-up.JPG" for crop in crop_list}
+
+for i, crop in enumerate(crop_list):
+    col = cols[i % 4]
+    if col.button(crop):
+        crop_selection = crop
+
+if crop_selection:
+    crop = crop_selection
+else:
+    crop = st.selectbox(t("Enter Crop"), crop_list)
+
+state = st.selectbox(t("Select State"), data['State'].unique())
+
+# ----------------- Prediction -----------------
+if st.button(t("Predict Price")):
+    input_df = pd.DataFrame([[crop, state]], columns=['Crop', 'State'])
+    predicted_price = model.predict(input_df)[0]
     
-    if not os.path.exists(model_path):
-        st.error("Model not found for this crop and state.")
-    else:
-        # Load model
-        model = load_model(model_path)
-        
-        # Prepare input
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        price_scaled = scaler.fit_transform(np.array([[recent_price]]))
-        price_scaled = price_scaled.reshape((1, 1, 1))
-        
-        # Predict
-        prediction_scaled = model.predict(price_scaled)
-        predicted_price = scaler.inverse_transform(prediction_scaled)[0][0]
-        
-        # Price Message
-        message_eng = f"Predicted Price: ₹{predicted_price:.2f}"
-        message_tam = f"மதிப்பிடப்பட்ட விலை: ₹{predicted_price:.2f}"
-        
-        # SELL / WAIT Logic
-        suggestion_eng = ""
-        suggestion_tam = ""
-        if predicted_price > recent_price * 1.05:
-            suggestion_eng = "Suggestion: WAIT! Price might increase."
-            suggestion_tam = "பரிந்துரை: காத்திருக்கவும்! விலை உயரும்."
-        elif predicted_price < recent_price * 0.95:
-            suggestion_eng = "Suggestion: SELL NOW! Price might decrease."
-            suggestion_tam = "பரிந்துரை: இப்போது விற்கவும்! விலை குறையலாம்."
-        else:
-            suggestion_eng = "Suggestion: No major change. You can decide."
-            suggestion_tam = "பரிந்துரை: பெரிய மாற்றம் இல்லை. நீங்கள் முடிவு செய்யலாம்."
-        
-        # Display messages
-        if language == "English":
-            st.success(message_eng)
-            st.info(suggestion_eng)
-        else:
-            st.success(message_tam)
-            st.info(suggestion_tam)
-        
-        # Audio output for both
-        final_text = (message_eng + " " + suggestion_eng) if language == "English" else (message_tam + " " + suggestion_tam)
-        tts = gTTS(text=final_text, lang="en" if language == "English" else "ta")
-        audio_bytes = BytesIO()
-        tts.write_to_fp(audio_bytes)
-        st.audio(audio_bytes.getvalue(), format="audio/mp3")
+    recent_prices = data[(data['Crop']==crop) & (data['State']==state)]['Price'].tail(30)
+    avg_recent = recent_prices.mean() if not recent_prices.empty else predicted_price
+    suggestion = t("Sell") if predicted_price >= avg_recent else t("Wait")
+    
+    # ----------------- Display Prediction -----------------
+    col1, col2 = st.columns([1,1])
+    col1.markdown(f"<h2 style='background-color:white;padding:10px;border-radius:10px;text-align:center'>{t('Predicted Price')}: ₹{predicted_price:.2f}</h2>", unsafe_allow_html=True)
+    
+    color = "green" if suggestion==t("Sell") else "orange"
+    col2.markdown(f"<h2 style='background-color:{color};padding:10px;border-radius:10px;text-align:center;color:white'>{t('Suggestion')}: {suggestion}</h2>", unsafe_allow_html=True)
+    
+    # ----------------- Wikipedia Info -----------------
+    try:
+        wiki_page = wikipedia.page(crop)
+        img_url = wiki_page.images[0]
+        response = requests.get(img_url)
+        img = Image.open(BytesIO(response.content))
+        st.image(img, caption=crop, use_column_width=True)
+        summary = wikipedia.summary(crop, sentences=3)
+        st.markdown(f"**{t('Wikipedia Summary')}:** {summary}")
+    except:
+        st.warning("Crop info not found on Wikipedia.")
+    
+    # ----------------- Audio -----------------
+    text_to_speak = f"{t('Predicted Price')}: {predicted_price:.2f}. {t('Suggestion')}: {suggestion}."
+    tts = gTTS(text=text_to_speak, lang='ta' if language=="தமிழ்" else 'en')
+    tts.save("prediction.mp3")
+    
+    audio_file = open("prediction.mp3", "rb")
+    audio_bytes = audio_file.read()
+    st.audio(audio_bytes, format="audio/mp3", start_time=0)
+
+
+
 
 
 
