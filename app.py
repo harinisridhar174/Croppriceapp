@@ -1,87 +1,61 @@
 import streamlit as st
 import pandas as pd
 import pickle
-import numpy as np
-from datetime import datetime, timedelta
-import base64
 
-# ----------------- Page Config -----------------
-st.set_page_config(page_title="Agri Crop Price Predictor", layout="wide")
+# Load trained LSTM model
+with open("lstm_models.pkl", "rb") as f:
+    model = pickle.load(f)
 
-# ----------------- Background Image Function -----------------
-def add_bg_from_local(image_file):
-    with open(image_file, "rb") as f:
-        encoded = base64.b64encode(f.read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/png;base64,{encoded}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+# Load dataset
+data = pd.read_csv("crops_prices.csv")  # make sure file is in the same folder
 
-# Call background setter (replace with your image filename)
-add_bg_from_local("plough_tool.jpg")  # <-- Put your ancient ploughing tool image in project folder
+st.title("🌾 Crop Price Prediction & Selling Suggestion")
 
-# ----------------- Load Model -----------------
-with open('crop_price_model.pkl', 'rb') as file:
-    model_data = pickle.load(file)
+# User input
+crop = st.selectbox("Select Crop", data["Crop"].unique())
+state = st.selectbox("Select State", data["State"].unique())
 
-model = model_data['model']
-scaler = model_data['scaler']
-crop_state_data = model_data['crop_state_data']
+if st.button("Predict Price"):
+    # Filter dataset
+    subset = data[(data["Crop"] == crop) & (data["State"] == state)]
 
-# ----------------- Title -----------------
-st.markdown("<h1 style='color:#2E8B57;'>🌾 Agri Crop Price Predictor</h1>", unsafe_allow_html=True)
-st.write("Enter the details below to get the predicted price and sell recommendation:")
-
-# ----------------- Farmer Inputs -----------------
-crop_name = st.selectbox("Select Crop", crop_state_data['Crop'].unique())
-state = st.selectbox("Select State", crop_state_data['State'].unique())
-current_price = st.number_input("Enter Current Market Price", min_value=0.0, value=0.0)
-
-# ----------------- Prediction -----------------
-if st.button("Predict Price and Recommendation"):
-
-    input_df = crop_state_data[(crop_state_data['Crop'] == crop_name) &
-                               (crop_state_data['State'] == state)].copy()
-
-    if input_df.empty:
-        st.warning("No data available for this crop & state combination.")
+    if subset.empty:
+        st.error("❌ No data available for this crop and state.")
     else:
-        last_features = input_df.iloc[-1:].drop(['Price'], axis=1).values
-        last_scaled = scaler.transform(last_features)
+        # Prepare features (adjust if model training was different)
+        X = subset.drop(columns=["Price"])  # assuming "Price" is target
+        y = subset["Price"]
 
-        # Predict price
-        predicted_price_scaled = model.predict(last_scaled)
-        predicted_price = scaler.inverse_transform(
-            np.hstack([last_features[:, :-1], predicted_price_scaled.reshape(-1, 1)])
-        )[:, -1][0]
+        # Predict using last available row
+        predicted_price = model.predict([X.values[-1]])[0]
 
-        # Recommendation logic
-        if predicted_price > current_price * 1.05:
-            recommendation = "Wait to sell for higher profit"
-            best_time = datetime.now() + timedelta(days=7)
-        else:
-            recommendation = "Sell now"
-            best_time = datetime.now()
+        # Recent average price
+        recent_avg = y.tail(5).mean()
 
-        # Trend Indicator
-        if predicted_price > current_price:
-            trend = "📈 Rising"
-        elif predicted_price < current_price:
-            trend = "📉 Falling"
-        else:
-            trend = "➖ Stable"
+        # Suggestion
+        suggestion = "✅ SELL now" if predicted_price > recent_avg else "⏳ WAIT for better price"
 
-        # ----------------- Display Results -----------------
-        st.success(f"Predicted Price: ₹{predicted_price:.2f}")
-        st.info(f"Recommendation: {recommendation}")
-        st.info(f"Suggested Best Time to Sell: {best_time.strftime('%Y-%m-%d')}")
-        st.warning(f"Trend: {trend}")
+        # Show results
+        st.subheader("📊 Prediction Result")
+        st.write(f"**Crop:** {crop}")
+        st.write(f"**State:** {state}")
+        st.write(f"**Predicted Price:** {predicted_price:.2f}")
+        st.write(f"**Recent Avg Price:** {recent_avg:.2f}")
+        st.success(f"💡 Suggestion: {suggestion}")
+
+        # Add visualization
+        st.subheader("📈 Price Trend")
+        chart_data = subset[["Price"]].reset_index(drop=True)
+        chart_data["Type"] = "Historical"
+
+        # Append predicted price as "future" point
+        future_point = pd.DataFrame({
+            "Price": [predicted_price],
+            "Type": ["Predicted"]
+        })
+
+        chart_data = pd.concat([chart_data, future_point], ignore_index=True)
+
+        st.line_chart(chart_data, y="Price", x=None, color="Type")
+
+
