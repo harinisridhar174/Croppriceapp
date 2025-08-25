@@ -1,50 +1,60 @@
 import streamlit as st
-import numpy as np
-import pickle
-from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
+import pickle
+import numpy as np
+from datetime import datetime, timedelta
 
-st.title("🌾 Crop Price Prediction & Suggestion")
+# Load the trained LSTM model
+with open('crop_price_model.pkl', 'rb') as file:
+    model_data = pickle.load(file)
 
-# ----------------- Embedded Data -----------------
-data = pd.DataFrame({
-    'Crop': ['Wheat', 'Rice', 'Maize', 'Sugarcane'],
-    'State': ['State1', 'State1', 'State2', 'State2'],
-    'Price': [2000, 1500, 1800, 2200],
-    'Date': pd.date_range(start='2025-01-01', periods=4)
-})
+model = model_data['model']
+scaler = model_data['scaler']
+crop_state_data = model_data['crop_state_data']  # Data to map crop & state to numeric if needed
 
-# ----------------- Load LSTM model -----------------
-with open('lstm_models.pkl', 'rb') as f:
-    model = pickle.load(f)
+# Title
+st.title("Agri Crop Price Predictor")
 
-# Dropdowns
-crop = st.selectbox("Select Crop", data['Crop'].unique())
-state = st.selectbox("Select State", data['State'].unique())
+st.write("Enter the details below to get the predicted price and sell recommendation:")
 
-# Prepare input for LSTM (using embedded data)
-def prepare_input(crop, state):
-    df = data[(data['Crop']==crop) & (data['State']==state)]
-    df = df.sort_values('Date')
-    recent_prices = df['Price'].values
-    if len(recent_prices) < 30:
-        recent_prices = np.pad(recent_prices, (30-len(recent_prices), 0),
-                               'constant', constant_values=df['Price'].mean())
-    scaler = MinMaxScaler()
-    recent_prices_scaled = scaler.fit_transform(recent_prices.reshape(-1,1))
-    return recent_prices_scaled.reshape(1,30,1), scaler
+# Farmer inputs
+crop_name = st.selectbox("Select Crop", crop_state_data['Crop'].unique())
+state = st.selectbox("Select State", crop_state_data['State'].unique())
+current_price = st.number_input("Enter Current Market Price", min_value=0.0, value=0.0)
 
-# Prediction button
-if st.button("Get Suggestion"):
-    X_input, scaler = prepare_input(crop, state)
-    predicted_scaled = model.predict(X_input)
-    predicted_price = scaler.inverse_transform(predicted_scaled)[0][0]
+# Button to predict
+if st.button("Predict Price and Recommendation"):
+    
+    # Prepare input for model
+    # Assuming your model takes [crop_encoded, state_encoded, current_price] or similar
+    input_df = crop_state_data[(crop_state_data['Crop']==crop_name) & 
+                               (crop_state_data['State']==state)].copy()
+    
+    if input_df.empty:
+        st.warning("No data available for this crop & state combination.")
+    else:
+        # Example: take last available features
+        last_features = input_df.iloc[-1:].drop(['Price'], axis=1).values
+        last_scaled = scaler.transform(last_features)
+        
+        # Predict price
+        predicted_price_scaled = model.predict(last_scaled)
+        predicted_price = scaler.inverse_transform(np.hstack([last_features[:, :-1], predicted_price_scaled.reshape(-1,1)]))[:, -1][0]
+        
+        # Recommendation logic
+        if predicted_price > current_price * 1.05:
+            recommendation = "Wait to sell for higher profit"
+            best_time = datetime.now() + timedelta(days=7)  # Example: 1 week later
+        else:
+            recommendation = "Sell now"
+            best_time = datetime.now()
+        
+        # Display results
+        st.success(f"Predicted Price: ₹{predicted_price:.2f}")
+        st.info(f"Recommendation: {recommendation}")
+        st.info(f"Suggested Best Time to Sell: {best_time.strftime('%Y-%m-%d')}")
 
-    avg_price = data[data['Crop']==crop]['Price'].mean()
-    suggestion = "Sell ✅" if predicted_price >= avg_price else "Wait ⏳"
 
-    st.success(f"Predicted Price: ₹{predicted_price:.2f}")
-    st.info(f"Suggestion: {suggestion}")
 
 
 
